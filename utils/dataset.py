@@ -1,6 +1,9 @@
 import os
 import os.path as osp
+import shutil
 import json
+import requests
+import zipfile
 
 import numpy as np
 from PIL import Image
@@ -26,12 +29,26 @@ class MicroFlowDataset(Dataset):
     def __init__(
         self,
         root_dir: str,
-        augment: bool = False
+        augment: bool = False,
+        download: bool = False,
     ):
+        """
+        Initialize dataset.
+
+        Args:
+            root_dir: directory where data is stored.
+            augment: whether to augment the dataset by flipping the arrays.
+            download: whether to download the dataset if not present in `root_dir`.
+        """
+
         self.root_dir = root_dir
         self.augment = augment
 
         self.data: dict[str, torch.Tensor] = {}
+
+        self._download_url = 'https://zenodo.org/records/16940478/files/dataset.zip?download=1'
+        if download:
+            self.download(url=self._download_url)
 
         self.process()
 
@@ -102,6 +119,32 @@ class MicroFlowDataset(Dataset):
         # save statistics
         self._save_statistics()
 
+    def download(self, url: str):
+        """
+        Download dataset.
+        
+        Args:
+            url: URL of the dataset.
+        """
+
+        # 1. Download dataset
+        zip_path = download_data(url=url, save_dir=self.root_dir)
+        
+        # 2. Unzip data
+        folder_path = unzip_data(zip_path=zip_path, save_dir=self.root_dir)
+        
+        # 3. Move folder
+        dest_path = osp.join(self.root_dir, 'raw')
+        try:
+            shutil.move(folder_path, dest_path)
+            print(f"Moved {folder_path} to {dest_path}.")
+
+        except shutil.Error as e:
+            print(f"Error during move operation: {e}")
+        except FileNotFoundError:
+            print(f"Destination path not found. Make sure the parent directory exists.")
+    
+
     def __len__(self):
         num_data = self.data['microstructure'].shape[0]
         return num_data
@@ -122,7 +165,8 @@ class MicroFlowDataset(Dataset):
         """
         Load dataset.
         
-        `folder`: dataset folder.
+        Args:
+            folder: dataset folder.
         """
 
         meta_dict = {
@@ -168,6 +212,8 @@ class MicroFlowDataset(Dataset):
         Save dataset statistics.
 
         """
+        log_file = osp.join(self.root_dir, 'statistics.json')
+
         stats = {
             'U': {
                 'max': self.data['velocity'].abs().max().item()
@@ -181,7 +227,6 @@ class MicroFlowDataset(Dataset):
         }
 
         # save
-        log_file = osp.join(self.root_dir, 'statistics.json')
         with open(log_file, 'w') as f:
             json.dump(stats, f, indent=0)
 
@@ -215,203 +260,23 @@ class MicroFlowDataset3D(MicroFlowDataset):
     Dataset for steady-state velocity flow field in slices of a 3D microstructure.
     """
 
-    def __getitem__(self, idx):
-
-        img  = self.input[idx]
-        U = self.target_U[idx]
-        p = self.target_p[idx]
-
-        dxdydz = self.dxyz[idx]
-
-        # there's a single value,
-        # representing the permeability of the 3D microstructure
-        k = self.permeab[0]
+    def __getitem__(self, idx) -> dict[str, torch.Tensor]:
 
         sample = {
-            'microstructure': img,
-            'velocity': U,
-            'pressure': p,
-            'dxyz': dxdydz,
-            'permeability': k
-
+            'microstructure': self.data['microstructure'][idx, :, :, :].float(),
+            'velocity': self.data['velocity'][idx, [0,1], :, :].float(),
+            'pressure': self.data['pressure'][idx, :, :, :].float(),
+            'dxyz': self.data['dxyz'][idx].float(),
+            'permeability': self.data['permeability'][0] # there's a single permeability value
         }
-        if self.transform:
-            sample = self.transform(sample)
-
         return sample
 
 
-
-class DatasetTransform:
-    """
-    Normalize velocity, pressure, and dimension values in dataset.
-    """
-
-    def __init__(self, input_var: str | dict) -> None:
-
-
-        if isinstance(input_var, str):
-            # the input is directory of dataset,
-            # compute statistics
-            root_dir = input_var
-            
-            # velocity, pressure, and dimensions
-            target_U: torch.Tensor = torch.load(osp.join(root_dir, 'x', 'U.pt'))
-            # target_U_y: torch.Tensor = torch.load(osp.join(root_dir, 'y', 'U.pt'))
-            target_p: torch.Tensor = torch.load(osp.join(root_dir, 'x', 'p.pt'))
-            dxyz: torch.Tensor = torch.load(osp.join(root_dir, 'x', 'dxyz.pt'))
-
-            # target_U = torch.cat((target_U_x, target_U_y[:, [1,0,2]]))
-            self._max_U = target_U.abs().max().item()
-            self._max_p = target_p.max().item()
-            self._max_d = dxyz.max().item()
-
-            # save statistics
-            self._params = {
-                'U': {'max': self._max_U},
-                'p': {'max': self._max_p},
-                'd': {'max': self._max_d},
-            }
-
-            # write
-            log_file = osp.join(root_dir, 'statistics.json')
-            with open(log_file, 'w') as f:
-                json.dump(self._params, f, indent=0)
-
-        elif isinstance(input_var, dict):
-            
-            self._params = input_var
-
-            # Directly use statistics that have already been computed
-            self._max_U = self._params['U']['max']
-            self._max_p = self._params['p']['max']
-            self._max_d = self._params['d']['max']
-
-        print(f'Statistics: {self._params}')
-
-    def __call__(
-        self,
-        data: dict[str, torch.Tensor]
-    ):
-
-        velocity = data['velocity']
-        pressure = data['pressure']
-        dxyz = data['dxyz']
-
-        # transform
-        velocity_new = self.transform_U(velocity)
-        pressure_new = self.transform_p(pressure)
-        dxyz_new = self.transform_d(dxyz)
-
-        data['velocity'] = velocity_new
-        data['pressure'] = pressure_new
-        data['dxyz'] = dxyz_new
-
-        return data
-
-    def inverse_transform(
-        self,
-        data: dict[str, torch.Tensor]
-    ):
-
-        velocity = data['velocity']
-        pressure = data['pressure']
-        dxyz = data['dxyz']
-
-        # inverse-transform
-        velocity_new = self.inverse_transform_U(velocity)
-        pressure_new = self.inverse_transform_p(pressure)
-        dxyz_new = self.inverse_transform_d(dxyz)
-
-        data['velocity'] = velocity_new
-        data['pressure'] = pressure_new
-        data['dxyz'] = dxyz_new
-
-        return data
-
-    def transform_U(self, data: torch.Tensor):
-        """Transform velocity"""
-
-        # transform
-        data = data / self._max_U
-
-        return data
-    
-    def transform_p(self, data: torch.Tensor):
-        """Transform pressure"""
-
-        # transform
-        data = data / self._max_p
-
-        return data
-    
-    def transform_d(self, data: torch.Tensor):
-        """Transform dimension"""
-
-        # transform
-        data = data / self._max_d
-
-        return data
-    
-    def inverse_transform_U(self, data: torch.Tensor):
-        """Inverse-transform velocity"""
-
-        # inverse-transform
-        data = data * self._max_U
-
-        return data
-    
-    def inverse_transform_p(self, data: torch.Tensor):
-        """Inverse-transform pressure"""
-
-        # inverse-transform
-        data = data * self._max_p
-
-        return data
-
-    def inverse_transform_d(self, data: torch.Tensor):
-        """Inverse-transform dimension"""
-
-        # inverse-transform
-        data = data * self._max_d
-
-        return data
-
-
-class LogTransform:
-
-    def __init__(self):
-        pass
-
-    def __call__(self, data: torch.Tensor):
-
-        min_val = data.min()
-
-        # shift so that all values are positive
-        data_tr = data - min_val
-
-        # transform
-        out = torch.log10( 1 + data_tr)
-
-        return out
-
-    def inverse_transform(
-        data: torch.Tensor,
-        min_val: float
-    ):
-        # apply log
-        data_tr = 10**(data)
-
-        # shift
-        out = data_tr - 1 + min_val
-
-        return out 
 
 
 def get_loader(
     root_dir,
     augment=False,
-    transform=None,
     train_ratio=0.8,
     batch_size=32,
     num_workers=8,
@@ -419,7 +284,7 @@ def get_loader(
     pin_memory=True,
     seed=2024,
     k_folds: int = None
-) -> list[tuple]:
+) -> list[tuple[DataLoader, DataLoader]]:
     """
     Load dataset.
 
@@ -428,11 +293,7 @@ def get_loader(
     generator = torch.Generator().manual_seed(seed) if seed is not None else seed
 
     # Dataset
-    dataset = MicroFlowDataset(
-        root_dir,
-        augment=augment,
-        # transform=transform
-    )
+    dataset = MicroFlowDataset(root_dir, augment=augment)
 
     # Split data
     if k_folds is None:
@@ -553,3 +414,55 @@ def load_micrograph_data(folder: str) -> dict[str, torch.Tensor]:
         'dxyz': dxyz
     }
     return out
+
+
+
+def download_data(
+    url: str,
+    save_dir: str
+):
+    """
+    Download data from URL.
+
+    Args:
+        url: URL of the data.
+        save_dir: directory where data is stored.
+    """
+
+    if not osp.exists(save_dir):
+        os.makedirs(save_dir, exist_ok=True)
+
+    zip_path = osp.join(save_dir, 'dataset.zip')
+
+    if not osp.exists(zip_path):
+        
+        print(f'Downloading data from {url} ...')
+        response = requests.get(url)
+        with open(zip_path, 'wb') as f:
+            f.write(response.content)
+        print('Download completed.')
+    else:
+        print(f'Zip file already exists at {zip_path}. Skipping download.')
+
+    return zip_path
+
+
+def unzip_data(zip_path: str, save_dir: str) -> str:
+    """
+    Extract data from zip file.
+
+    Args:
+        zip_path: path to the zip file.
+        save_dir: directory where data is extracted to.
+    """
+    print(f'Extracting data from {zip_path}...')
+
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        # the zip file contains a single folder (with subfolders/files)
+        namelist = zip_ref.namelist()
+        folder_name = namelist[0].split('/')[0]
+        zip_ref.extractall(save_dir)
+
+    folder_path = osp.join(save_dir, folder_name)
+    print(f'Data extracted to {folder_path}.')
+    return folder_path

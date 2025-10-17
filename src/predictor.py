@@ -83,7 +83,7 @@ class Predictor(ABC, nn.Module):
 
 class VelocityPredictor(Predictor):
     """
-    Model for predicting velocity field in microstructures.
+    Model for velocity field prediction in microstructures.
     """
 
     def __init__(
@@ -100,7 +100,10 @@ class VelocityPredictor(Predictor):
 
     def forward(self, img: torch.Tensor):
         """
-        `x`: (binary) microstructure images with 1 in fluid areas. Shape: (batch, 1, height, width).
+        Forward pass for the model.
+
+        Args:
+            img: (binary) microstructure images with 1 in fluid areas and 0 in fiber areas. Shape: (batch, 1, height, width).
         """
 
         mask = img.clone()
@@ -113,7 +116,13 @@ class VelocityPredictor(Predictor):
         return out
 
     def predict(self, img: torch.Tensor):
-        
+        """
+        Predict velocity field from input microstructure images.
+
+        Args:
+            img: (binary) microstructure images with 1 in fluid areas and 0 in fiber areas. Shape: (batch, 1, height, width).
+        """
+
         pred = self(img)
         out = self.normalizer['output'].inverse(pred)
         return out
@@ -122,7 +131,8 @@ class VelocityPredictor(Predictor):
         """
         Pre-process inputs.
 
-        `img`: (binary) microstructure images, with 1 in fluid areas. Shape: (batch, 1, height, width).
+        Args:
+            img: (binary) microstructure images with 1 in fluid areas and 0 in fiber areas. Shape: (batch, 1, height, width).
         """
         assert img.dim() == 4
         assert img.shape[1] == 1 # only 1 channel
@@ -137,7 +147,7 @@ class VelocityPredictor(Predictor):
 
 class PressurePredictor(Predictor):
     """
-    Model for predicting pressure field in microstructures.
+    Model for pressure field prediction in microstructures.
     """
 
     def __init__(
@@ -158,8 +168,11 @@ class PressurePredictor(Predictor):
         x_length: torch.Tensor
     ):
         """
-        `img`: (binary) microstructure images with 1 in fluid areas. Shape: (batch, 1, height, width).\n
-        `x_length`: Microstructure length. Shape: (batch, 1) or (batch, 1, height, width).
+        Forward pass for the model.
+
+        Args:
+            img: (binary) microstructure images with 1 in fluid areas and 0 in fiber areas. Shape: (batch, 1, height, width).
+            x_length: Microstructure (physical) length. Shape: (batch, 1) or (batch, 1, height, width).
         """
 
         mask = img.clone()
@@ -176,9 +189,16 @@ class PressurePredictor(Predictor):
         img: torch.Tensor,
         x_length: torch.Tensor
     ):
+        """
+        Predict pressure field from input microstructure images.
         
+        Args:
+            img: (binary) microstructure images with 1 in fluid areas and 0 in fiber areas. Shape: (batch, 1, height, width).
+            x_length: Microstructure (physical) length. Shape: (batch, 1) or (batch, 1, height, width).
+        """
+
         pred = self(img, x_length)
-        out = self.normalizer['output'].inverse(pred)
+        out = self.normalizer['output'].inverse(pred) # ρ-normalized pressure
         return out
     
 
@@ -190,8 +210,9 @@ class PressurePredictor(Predictor):
         """
         Pre-process inputs.
 
-        `img`: (binary) microstructure images with 1 in fluid areas. Shape: (batch, 1, height, width).\n
-        `x_length`: Microstructure length. Shape: (batch, 1) or (batch, 1, height, width).
+        Args:
+            img: (binary) microstructure images with 1 in fluid areas and 0 in fiber areas. Shape: (batch, 1, height, width).
+            x_length: Microstructure (physical) length. Shape: (batch, 1) or (batch, 1, height, width).
         """
 
         x_length = self._process_microstructure_length(x_length, img.shape)
@@ -228,11 +249,11 @@ class PressurePredictor(Predictor):
         shape: tuple
     ):
         """
-        Evaluate whether microstructures' length is passed as scalars or matrices.\n
-        Returns a 4D tensor.
+        Evaluate whether microstructures' length is passed as scalars or matrices. Returns a 4D tensor.
         
-        `x_length`: microstructre length.\n
-        `shape`: (samples, 1, height, width).
+        Args:
+            x_length: microstructure (physical) length.
+            shape: shape (samples, 1, height, width) of microstructure images. Used to expand `x_length` if needed.
         """
         if x_length.dim() == 4:
             # shape: (samples, 1, height, width)
@@ -248,8 +269,9 @@ class PressurePredictor(Predictor):
     def _compute_fiber_vf(img: torch.Tensor):
         """
         Compute fiber volume fraction
-        
-        `img`: microstructure image. Shape: (samples, 1, height, width).
+
+        Args:
+            img: (binary) microstructure images with 1 in fluid areas and 0 in fiber areas. Shape: (batch, 1, height, width).
         """
 
         fluid_vf = torch.sum(
@@ -269,9 +291,10 @@ class PressurePredictor(Predictor):
 
 def apply_distance_transform(imgs: torch.Tensor):
     """
-    Perform distance tranform of input images.
+    Perform distance transform of input images.
 
-    `imgs`: batch of images of shape (n_img, 1, x, x)
+    Args:
+        imgs: batch of images, with shape (n_img, 1, height, width)
     """
     device = imgs.device
 

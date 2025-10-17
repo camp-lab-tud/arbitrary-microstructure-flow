@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, Callable
 import time
 
 import numpy as np
@@ -37,6 +37,13 @@ class SlidingWindow:
         step_size: int = None,
         batch_size: int = None
     ) -> dict[str, torch.Tensor]:
+        """
+        Predict velocity field for larger (rectangular) microstructure image.
+        
+        Args:
+            img: microstructure image, 2D tensor with 0 and 1 respectively in
+                fiber and fluid regions. Shape: (height, width).
+        """
         
         if self.velocity_model is None:
             raise ValueError('Velocity model was not defined.')
@@ -87,6 +94,8 @@ class SlidingWindow:
         print(f'Prediction in {dtime:.2f}s.')
 
         out = {
+            'microstructure': img.unsqueeze(0), # shape: (1, height, width)
+
             'prediction': prediction_corrected, # shape: (channels, height, width)
             'prediction_naive': result['average'], # shape: (channels, height, width)
             'window_predictions': result['values'], # shape: (channels, height, width, num of windows)
@@ -104,6 +113,13 @@ class SlidingWindow:
         step_size: int = None,
         batch_size: int = None
     ) -> dict[str, torch.Tensor]:
+        """
+        Predict pressure field for rectangular microstructure.
+
+        Args:
+            img: microstructure image, 2D tensor with 0 and 1 respectively in fiber and fluid regions. Shape: (height, width).
+            x_length: physical length of microstructure in flow direction.
+        """
         
         if self.pressure_model is None:
             raise ValueError('Pressure model was not defined.')
@@ -158,12 +174,78 @@ class SlidingWindow:
         print(f'Prediction in {dtime:.2f}s.')
 
         out = {
+            'microstructure': img.unsqueeze(0), # shape: (1, height, width)
+            
             'prediction': result['average'], # shape: (channels, height, width)
             'window_predictions': result['values'], # shape: (channels, height, width, num of windows)
             'window_positions': frame_positions # length: num of windows
         }
         return out
 
+    @staticmethod
+    @torch.no_grad()
+    def compute_flow_rate(
+        img: torch.Tensor,
+        velocity_dict: dict[str, torch.Tensor],
+        cross_section_area: torch.Tensor | float = 1.0
+    ) -> dict[str, torch.Tensor]:
+        """
+        Compute flow rate based on velocity field.
+
+        Args:
+            img: microstructure image, 2D tensor with 0 and 1 respectively in fiber and fluid regions. Shape: (height, width).
+            velocity_dict: dictionary with velocity fields. Each field is a 3D tensor with shape (channels, height, width).
+            cross_section_area: cross-sectional area (perpendicular to flow direction) of microstructure.
+        """
+
+        _keys = ['target', 'prediction', 'prediction_naive']
+
+        img = img.squeeze()
+        assert img.dim() == 2, 'Tensor should be 2D with shape (nrows, ncols).'
+        img = img.unsqueeze(0).unsqueeze(0) # shape: (1, 1, height, width)
+
+        out = {}
+        for ky in _keys:
+            if ky in velocity_dict.keys():
+
+                vel_field = velocity_dict[ky] # shape: (channels, height, width)
+                assert vel_field.dim() == 3, 'Tensor should be 3D with shape (channels, height, width).'
+                vel_field = vel_field.unsqueeze(0) # shape: (1, channels, height, width)
+
+                flow_rate = get_flow_rate(
+                    rve_tensor=img,
+                    vel_tensor=vel_field,
+                    cross_section_area=cross_section_area
+                ) # shape: (1, width)
+                flow_rate = flow_rate.squeeze(0) # shape: (width,)
+                out[ky] = flow_rate
+
+        return out
+
+
+    @staticmethod
+    def compute_loss(
+        func: Callable,
+        target: torch.Tensor,
+        prediction_dict: dict[str, torch.Tensor]
+    ):
+        """
+        Compute loss between target and prediction.
+        
+        Args:
+            func: loss function.
+            target: target tensor.
+            prediction_dict: dictionary with predicted tensors.
+        """
+        _keys = ['prediction', 'prediction_naive']
+
+        out = {}
+        for ky in _keys:
+            if ky in prediction_dict.keys():
+                prediction = prediction_dict[ky]
+                loss = func(target, prediction)
+                out[ky] = loss
+        return out
 
 
     @staticmethod

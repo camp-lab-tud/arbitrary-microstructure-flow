@@ -7,13 +7,13 @@ import argparse
 import torch
 
 from src.predictor import VelocityPredictor, PressurePredictor
-from src.helper import get_model
+from src.helper import get_model, retrieve_model_path
 from src.unet.metrics import normalized_mae_loss
 from utils.dataset import get_loader
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--folder', type=str, required=True, help='Folder generated during model training.')
+parser.add_argument('--directory-or-url', type=str, required=True, help='Local directory or URL with trained model file.')
 parser.add_argument('--root-dir', type=str, default=None, help='Dataset directory.')
 parser.add_argument('--split', type=str, default='valid', choices=['train', 'valid'], help='Dataset split to use.')
 parser.add_argument('--device', type=str, default=None, help='Device to use (e.g., cpu, cuda).')
@@ -61,8 +61,14 @@ def evaluate_model(
 
 def main():
 
-    # read
-    log_file = osp.join(args.folder, 'log.json')
+    # get model path from local directory or URL
+    model_path = retrieve_model_path(
+        directory_or_url=args.directory_or_url,
+        filename='model.pt'
+    )
+
+    # read log file
+    log_file = osp.join(osp.dirname(model_path), 'log.json')
     with open(log_file) as fp:
         log_data = json.load(fp)
 
@@ -80,9 +86,7 @@ def main():
     train_loader, val_loader = get_loader(**data_kwargs)[0]
 
 
-    """Model"""
-    model_path = osp.join(args.folder, 'model.pt')
-
+    """Model"""    
     predictor = get_model(
         type=predictor_type,
         kwargs=predictor_kwargs,
@@ -123,7 +127,7 @@ def main():
 
     # save
     if args.save_dir is None:
-        args.save_dir = args.folder
+        args.save_dir = osp.dirname(model_path)
 
     subfolder = osp.join(args.save_dir, 'evaluation')
     if not osp.exists(subfolder):
