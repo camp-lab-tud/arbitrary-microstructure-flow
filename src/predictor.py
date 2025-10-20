@@ -1,5 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Union, Any
+import json
+import os
+import os.path as osp
 
 import torch
 import torch.nn as nn
@@ -8,13 +11,14 @@ from scipy import ndimage
 
 from .normalizer import Normalizer, MaxNormalizer
 from .unet.models import UNet
+from utils.zenodo import download_data, unzip_data, is_url
 
 
 _model_type = Union[UNet, Any]
 
 
 class Predictor(ABC, nn.Module):
-
+    
     def __init__(
         self,
         model_name: str,
@@ -37,16 +41,12 @@ class Predictor(ABC, nn.Module):
             torch.Tensor([distance_transform]),
             requires_grad=False
         )
-
-        print(f'Trainable parameters: {self.trainable_params}.')
-
-    @property
-    def trainable_params(self):
-        total = sum(
-            [p.numel() for p in self.model.parameters() if p.requires_grad]
-        )
-        return total
     
+    @property
+    @abstractmethod
+    def type(self) -> str:
+        pass
+
     @abstractmethod
     def forward(self, *args):
         pass
@@ -59,6 +59,13 @@ class Predictor(ABC, nn.Module):
     def pre_process(self, *args):
         pass
 
+    @property
+    def trainable_params(self):
+        total = sum(
+            [p.numel() for p in self.model.parameters() if p.requires_grad]
+        )
+        return total
+    
     def init_normalizer(self, in_channels: int, out_channels: int):
         """Initialize normalizers for model input & output"""
 
@@ -80,11 +87,96 @@ class Predictor(ABC, nn.Module):
 
         return self.normalizer
 
+    def load_weights(self, model_path: str, device: str):
+        """Load model parameters from `.pt` file."""
+        self.load_state_dict(
+            torch.load(
+                model_path,
+                map_location=torch.device(device)
+            )
+        )
+        print(f'Loaded weights from "{model_path}".')
+
+    @classmethod
+    def from_directory(cls, folder: str, device: str) -> 'Predictor':
+        """
+        Load trained ML model from folder.
+        
+        Args:
+            folder: Directory containing `model.pt` and `log.json` files created during training.
+            device: Device (e.g. "cuda:0" or "cpu") to map the model to.
+        """
+
+        log_file = osp.join(folder, 'log.json')
+        model_path = osp.join(folder, 'model.pt')
+
+        with open(log_file) as fp:
+            log_data = json.load(fp)
+        
+        param_dict = log_data['params']
+        predictor_type = param_dict['training']['predictor_type']
+        predictor_kwargs = param_dict['training']['predictor']
+
+        if predictor_type == 'velocity':
+            predictor_class = VelocityPredictor
+        elif predictor_type == 'pressure':
+            predictor_class = PressurePredictor
+        else:
+            raise ValueError(f'Unknown predictor type: {predictor_type}')
+
+        predictor = predictor_class(**predictor_kwargs)
+        predictor.to(device)
+        predictor.load_weights(model_path, device=device)
+        return predictor
+
+    @classmethod
+    def from_url(cls, url: str, device: str) -> 'Predictor':
+        """
+        Load trained ML model from URL. Pre-trained models are hosted here: https://doi.org/10.5281/zenodo.17306446.
+        
+        Args:
+            url: URL pointing to a zipped folder containing `model.pt` and `log.json` files created during training.
+            device: Device (e.g. "cuda:0" or "cpu") to map the model to.
+        """
+
+        _folder = 'pretrained'
+        os.mkdir(_folder, exist_ok=True)
+
+        # download pre-trained weights
+        zip_path = download_data(url=url, save_dir=_folder)
+
+        # unzip data
+        folder_path = unzip_data(zip_path=zip_path, save_dir=_folder)
+
+        predictor = cls.from_directory(folder_path, device=device)
+        return predictor
+
+    @classmethod
+    def from_directory_or_url(
+        cls,
+        directory_or_url: str,
+        device: str
+    ) -> 'Predictor':
+        """
+        Load trained ML model from local directory or URL.
+        
+        Args:
+            directory_or_url: either local directory or URL of the pre-trained model.
+            device: Device (e.g. "cuda:0" or "cpu") to map the model to.
+        """
+
+        if is_url(directory_or_url):
+            predictor = cls.from_url(url=directory_or_url, device=device)
+        else:
+            predictor = cls.from_directory(folder=directory_or_url, device=device)
+        return predictor
+
 
 class VelocityPredictor(Predictor):
     """
     Model for velocity field prediction in microstructures.
     """
+    type: str = 'velocity'
 
     def __init__(
         self,
@@ -97,6 +189,7 @@ class VelocityPredictor(Predictor):
             model_kwargs=model_kwargs,
             distance_transform=distance_transform
         )
+        print(f'Initialized {self.type} predictor with {self.trainable_params} parameters.')
 
     def forward(self, img: torch.Tensor):
         """
@@ -149,6 +242,7 @@ class PressurePredictor(Predictor):
     """
     Model for pressure field prediction in microstructures.
     """
+    type: str = 'pressure'
 
     def __init__(
         self,
@@ -161,6 +255,7 @@ class PressurePredictor(Predictor):
             model_kwargs=model_kwargs,
             distance_transform=distance_transform
         )
+        print(f'Initialized {self.type} predictor with {self.trainable_params} parameters.')
 
     def forward(
         self,

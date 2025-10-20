@@ -15,8 +15,9 @@ from torch.utils.data import (
     SubsetRandomSampler,
     random_split
 )
-from torchvision.transforms.functional import hflip, vflip
+from torchvision.transforms import v2
 
+from .zenodo import download_data, unzip_data
 
 
 
@@ -29,8 +30,7 @@ class MicroFlowDataset(Dataset):
     def __init__(
         self,
         root_dir: str,
-        augment: bool = False,
-        download: bool = False,
+        augment: bool = False
     ):
         """
         Initialize dataset.
@@ -38,18 +38,24 @@ class MicroFlowDataset(Dataset):
         Args:
             root_dir: directory where data is stored.
             augment: whether to augment the dataset by flipping the arrays.
-            download: whether to download the dataset if not present in `root_dir`.
         """
+        self._download_url = 'https://zenodo.org/records/16940478/files/dataset.zip?download=1'
 
         self.root_dir = root_dir
         self.augment = augment
 
         self.data: dict[str, torch.Tensor] = {}
 
-        self._download_url = 'https://zenodo.org/records/16940478/files/dataset.zip?download=1'
-        if download:
+        # Download dataset if needed
+        if not osp.exists(self.root_dir):
+            # make directory if it doesn't exist
+            os.mkdir(self.root_dir)
+        
+        if os.listdir(self.root_dir) == []:
+            # if directory is empty, download dataset
             self.download(url=self._download_url)
 
+        # Load dataset
         self.process()
 
 
@@ -253,6 +259,38 @@ class MicroFlowDataset(Dataset):
         return x
 
 
+class BlindDataset(Dataset):
+    """
+    Dataset for blind prediction (no target values).
+    """
+
+    def __init__(self, data: dict[str, torch.Tensor]):
+        """
+        Initialize dataset.
+        
+        Args:
+            data: dictionary of data tensors.
+        """
+
+        _keys = ['microstructure', 'dxyz']
+        data_keys = data.keys()
+        for key in _keys:
+            if key not in data_keys:
+                raise ValueError(f'Missing key `{key}` in data dictionary.')
+            
+        self.data: dict = data
+        
+    def __getitem__(self, idx) -> dict[str, torch.Tensor]:
+        out = {
+            key: val[idx]
+            for (key, val) in self.data.items()
+        }
+        return out
+    
+    def __len__(self):
+        num_data = len(self.data['microstructure'])
+        return num_data
+
 
 class MicroFlowDataset3D(MicroFlowDataset):
 
@@ -288,7 +326,8 @@ def get_loader(
     """
     Load dataset.
 
-    `root_dir`: directory where data is stored.
+    Args:
+        root_dir: directory where data is stored.
     """
     generator = torch.Generator().manual_seed(seed) if seed is not None else seed
 
@@ -358,16 +397,22 @@ def get_loader(
     return out
 
 
-def load_micrograph_data(folder: str) -> dict[str, torch.Tensor]:
+def load_VirtualPermeabilityBenchmark(
+        folder: str # './Benchmark package/Stack of segmented images/'
+    ) -> dict[str, torch.Tensor]:
     """
-    Load micrograph data. The data is the one used in this paper:
+    Load micrograph data from the Virtual Permeability Benchmark hosted here
+        https://doi.org/10.5281/zenodo.6611926
 
-    Syerko, Elena, et al.
-    "Benchmark exercise on image-based permeability determination of engineering textiles: Microscale predictions."
-    Composites Part A: Applied Science and Manufacturing 167 (2023): 107397.
+    and used in this paper:
+        Syerko, Elena, et al.
+        "Benchmark exercise on image-based permeability determination of engineering textiles: Microscale predictions."
+        Composites Part A: Applied Science and Manufacturing 167 (2023): 107397.
 
-    `folder`: The folder contains (.tif) images representing microstructure cross-sections 
-    obtained through an X-ray microscope.
+    To get access to the data, please visit the link above and request access from the authors.
+
+    Args:
+        folder: The folder contains (.tif) images representing microstructure cross-sections obtained through an X-ray microscope.
     """
     VOXEL_SIZE = 0.521 * 1e-6 # 0.521 microns/voxel
 
@@ -416,53 +461,30 @@ def load_micrograph_data(folder: str) -> dict[str, torch.Tensor]:
     return out
 
 
-
-def download_data(
-    url: str,
-    save_dir: str
+def resize_image(
+    img: torch.Tensor,
+    target_height: int = 256
 ):
     """
-    Download data from URL.
-
+    Resize image `img` to a height of `target_height`.
+    
     Args:
-        url: URL of the data.
-        save_dir: directory where data is stored.
+        img: input image tensor, with shape (*, H, W).
+        target_height: target height.
     """
+    # original image size
+    orig_size = img.shape[-2:]
+    orig_height, orig_width = orig_size
 
-    if not osp.exists(save_dir):
-        os.makedirs(save_dir, exist_ok=True)
+    factor = target_height / orig_height
+    target_width = int(orig_width * factor)
 
-    zip_path = osp.join(save_dir, 'dataset.zip')
+    new_size = (target_height, target_width)
 
-    if not osp.exists(zip_path):
-        
-        print(f'Downloading data from {url} ...')
-        response = requests.get(url)
-        with open(zip_path, 'wb') as f:
-            f.write(response.content)
-        print('Download completed.')
-    else:
-        print(f'Zip file already exists at {zip_path}. Skipping download.')
+    # Resize images
+    img = v2.Resize(
+        size=new_size,
+        antialias=True
+    )(img)
 
-    return zip_path
-
-
-def unzip_data(zip_path: str, save_dir: str) -> str:
-    """
-    Extract data from zip file.
-
-    Args:
-        zip_path: path to the zip file.
-        save_dir: directory where data is extracted to.
-    """
-    print(f'Extracting data from {zip_path}...')
-
-    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        # the zip file contains a single folder (with subfolders/files)
-        namelist = zip_ref.namelist()
-        folder_name = namelist[0].split('/')[0]
-        zip_ref.extractall(save_dir)
-
-    folder_path = osp.join(save_dir, folder_name)
-    print(f'Data extracted to {folder_path}.')
-    return folder_path
+    return img
