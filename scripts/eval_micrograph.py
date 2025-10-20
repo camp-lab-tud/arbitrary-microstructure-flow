@@ -17,7 +17,7 @@ from utils.dataset import (
     resize_image,
     BlindDataset
 )
-from utils.data import (
+from src.physics import (
     get_flow_rate,
     get_average_pressure
 )
