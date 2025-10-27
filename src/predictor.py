@@ -140,7 +140,7 @@ class Predictor(ABC, nn.Module):
         """
 
         _folder = 'pretrained'
-        os.mkdir(_folder, exist_ok=True)
+        if not osp.exists(_folder): os.mkdir(_folder)
 
         # download pre-trained weights
         zip_path = download_data(url=url, save_dir=_folder)

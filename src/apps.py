@@ -652,7 +652,7 @@ def get_reference_pressure(
         aggregation: method to aggregate pressure values from overlapping frames.
     """
     if isinstance(frame_columns, list):
-        frame_columns = torch.tensor(frame_columns)
+        frame_columns = torch.tensor(frame_columns, device=avg_pressure.device)
 
     assert avg_pressure.dim() == 2, 'Tensor should be 2D with shape (N, ncols).'
     assert frame_columns.dim() == 1, 'Tensor should be 1D with shape (N,).'

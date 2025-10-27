@@ -138,12 +138,12 @@ def main():
     
     # velocity predictor
     velocity_predictor = Predictor.from_directory_or_url(
-        folder=args.velocity_model,
+        directory_or_url=args.velocity_model,
         device=args.device
     )
     # pressure predictor
     pressure_predictor = Predictor.from_directory_or_url(
-        folder=args.pressure_model,
+        directory_or_url=args.pressure_model,
         device=args.device
     )
     assert isinstance(velocity_predictor, VelocityPredictor), 'Loaded model is not a VelocityPredictor.'
