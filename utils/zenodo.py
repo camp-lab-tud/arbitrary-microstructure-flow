@@ -66,10 +66,15 @@ def unzip_data(zip_path: str, save_dir: str) -> str:
         # the zip file contains a single folder (with subfolders/files)
         namelist = zip_ref.namelist()
         folder_name = namelist[0].split('/')[0]
-        zip_ref.extractall(save_dir)
 
-    folder_path = osp.join(save_dir, folder_name)
-    print(f'Data extracted to "{folder_path}".')
+        folder_path = osp.join(save_dir, folder_name)
+        if osp.exists(folder_path):
+            print(f'Folder "{folder_path}" already exists. Skipping extraction.')
+        else:
+            print(f'Extracting data from "{zip_path}" ...')
+            zip_ref.extractall(save_dir)
+            print(f'Data extracted to "{folder_path}".')
+    
     return folder_path
 
 
