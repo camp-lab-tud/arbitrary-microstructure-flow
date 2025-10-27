@@ -473,6 +473,8 @@ def resize_image(
         img: input image tensor, with shape (*, H, W).
         target_height: target height.
     """
+    assert img.dim() > 2, "Input image must have more than 2 dimensions."
+    
     # original image size
     orig_size = img.shape[-2:]
     orig_height, orig_width = orig_size
