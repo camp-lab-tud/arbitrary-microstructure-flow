@@ -2,16 +2,13 @@ from typing import Callable, Literal, Union
 import json
 import os
 import os.path as osp
-import requests
-import zipfile
-from urllib.parse import urlparse
 
 import torch
 from torch.utils.data import DataLoader
 import torch.optim as optim
 
 from src.predictor import VelocityPredictor, PressurePredictor
-
+from utils.zenodo import download_data, unzip_data, is_url
 
 
 def get_norm_params(
@@ -214,7 +211,7 @@ def retrieve_model_path(directory_or_url: str, filename: str = 'model.pt') -> st
         # Use pre-trained model in repo
 
         _folder = 'pretrained'
-        os.mkdir(_folder, exist_ok=True)
+        if not osp.exists(_folder): os.mkdir(_folder)
 
         # download pre-trained weights
         zip_path = download_data(url=directory_or_url, save_dir=_folder)
@@ -229,55 +226,3 @@ def retrieve_model_path(directory_or_url: str, filename: str = 'model.pt') -> st
         model_path = osp.join(directory_or_url, filename)
 
     return model_path
-
-
-def download_data(url: str, save_dir: str) -> str:
-    """
-    Download data from URL.
-
-    Args:
-        url: URL of the data.
-        save_dir: directory where data is stored.
-    """
-
-    if not osp.exists(save_dir):
-        os.makedirs(save_dir, exist_ok=True)
-    zip_path = osp.join(save_dir, 'file.zip')
-
-    print(f'Downloading data from {url} ...')
-    response = requests.get(url)
-    with open(zip_path, 'wb') as f:
-        f.write(response.content)
-    print(f'Data downloaded to {zip_path}.')
-
-    return zip_path
-
-
-def unzip_data(zip_path: str, save_dir: str) -> str:
-    """
-    Extract data from zip file.
-
-    Args:
-        zip_path: path to the zip file.
-        save_dir: directory where data is extracted to.
-    """
-    print(f'Extracting data from {zip_path}...')
-
-    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        # the zip file contains a single folder (with subfolders/files)
-        namelist = zip_ref.namelist()
-        folder_name = namelist[0].split('/')[0]
-        zip_ref.extractall(save_dir)
-
-    folder_path = osp.join(save_dir, folder_name)
-    print(f'Data extracted to {folder_path}.')
-    return folder_path
-
-
-def is_url(s: str) -> bool:
-    """Return True if string is a valid URL (http or https)."""
-    try:
-        parsed = urlparse(s.strip())
-        return parsed.scheme in ("http", "https") and bool(parsed.netloc)
-    except Exception:
-        return False

@@ -3,4 +3,6 @@
 .vscode
 .venv
 
+data/
+pretrained/
 trained/

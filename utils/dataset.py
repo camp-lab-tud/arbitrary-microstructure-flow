@@ -1,9 +1,9 @@
 import os
 import os.path as osp
 import shutil
+from pathlib import Path
 import json
-import requests
-import zipfile
+
 
 import numpy as np
 from PIL import Image
@@ -49,7 +49,7 @@ class MicroFlowDataset(Dataset):
         # Download dataset if needed
         if not osp.exists(self.root_dir):
             # make directory if it doesn't exist
-            os.mkdir(self.root_dir)
+            os.makedirs(self.root_dir)
         
         if os.listdir(self.root_dir) == []:
             # if directory is empty, download dataset
@@ -133,17 +133,18 @@ class MicroFlowDataset(Dataset):
             url: URL of the dataset.
         """
 
+        save_dir = Path(self.root_dir).parent
         # 1. Download dataset
-        zip_path = download_data(url=url, save_dir=self.root_dir)
+        zip_path = download_data(url=url, save_dir=save_dir)
         
         # 2. Unzip data
-        folder_path = unzip_data(zip_path=zip_path, save_dir=self.root_dir)
+        folder_path = unzip_data(zip_path=zip_path, save_dir=save_dir)
         
         # 3. Move folder
-        dest_path = osp.join(self.root_dir, 'raw')
+        dest_path = self.root_dir
         try:
             shutil.move(folder_path, dest_path)
-            print(f"Moved {folder_path} to {dest_path}.")
+            print(f'Moved "{folder_path}" to "{dest_path}".')
 
         except shutil.Error as e:
             print(f"Error during move operation: {e}")

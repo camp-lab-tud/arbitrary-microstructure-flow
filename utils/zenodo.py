@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 import requests
 import zipfile
 
+from tqdm import tqdm
 
 
 user_agents = [
@@ -29,12 +30,24 @@ def download_data(url: str, save_dir: str) -> str:
     zip_filename = get_zip_filename(url)
     zip_path = osp.join(save_dir, zip_filename)
 
-    print(f'Downloading data from {url} ...')
-    headers = {"User-Agent": random.choice(user_agents)} # add header to avoid being detected as bot
-    response = requests.get(url, headers=headers)
-    with open(zip_path, 'wb') as f:
-        f.write(response.content)
-    print(f'Data downloaded to {zip_path}.')
+    if osp.exists(zip_path):
+        print(f'File "{zip_path}" already exists. Skipping download.')
+
+    else:
+        print(f'Downloading data from "{url}" ...')
+        headers = {"User-Agent": random.choice(user_agents)} # add header to avoid being detected as bot
+        response = requests.get(url, headers=headers, stream=True)
+        response.raise_for_status()
+
+        total_size = int(response.headers.get('content-length', 0))
+
+        with tqdm(total=total_size, unit='B', unit_scale=True, desc=zip_filename) as pbar:
+            chunk_size = 1024 * 1024  # 1 MB
+            with open(zip_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=chunk_size):
+                    f.write(chunk)
+                    pbar.update(len(chunk))
+        print(f'Data downloaded to "{zip_path}".')
 
     return zip_path
 
@@ -47,7 +60,7 @@ def unzip_data(zip_path: str, save_dir: str) -> str:
         zip_path: path to the zip file.
         save_dir: directory where data is extracted to.
     """
-    print(f'Extracting data from {zip_path}...')
+    print(f'Extracting data from "{zip_path}" ...')
 
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
         # the zip file contains a single folder (with subfolders/files)
@@ -56,7 +69,7 @@ def unzip_data(zip_path: str, save_dir: str) -> str:
         zip_ref.extractall(save_dir)
 
     folder_path = osp.join(save_dir, folder_name)
-    print(f'Data extracted to {folder_path}.')
+    print(f'Data extracted to "{folder_path}".')
     return folder_path
 
 

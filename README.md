@@ -51,12 +51,15 @@ Open the terminal of your computer. Change the current working directory to the 
 ```
 git clone https://github.com/camp-lab-tud/arbitrary-microstructure-flow
 ```
+```
+cd arbitrary-microstructure-flow/
+```
 ## ⚙️ Setup
 
 
 Assuming that [Python 3.10.12](https://www.python.org/downloads/release/python-31012/) is installed on your computer, create a virtual environment in the main folder by running:
 ```
-python -m venv ${ENV}
+python3 -m venv ${ENV}
 ```
 `${ENV}` (e.g., `.venv`) is the environment's name.
 

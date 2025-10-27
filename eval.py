@@ -47,7 +47,7 @@ def evaluate_model(
     preds = predictor.predict(*input)
 
     loss = normalized_mae_loss(preds, targets, reduce=False)
-    print('loss', loss.mean())
+    print('loss: ', loss.mean().item())
 
     out = {
         'microstructure': imgs,
